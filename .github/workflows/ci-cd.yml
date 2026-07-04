@@ -1,0 +1,95 @@
+name: FinStats CI/CD
+
+on:
+  push:
+    branches: ['main']
+  workflow_dispatch:
+
+# permite que o workflow crie releases neste mesmo repositorio
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build APK e Publicar
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar o codigo
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Configurar Java (Gradle)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Expo Prebuild (gerar pastas nativas Android)
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Restaurar o keystore de assinatura
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+
+      - name: Configurar a assinatura no Gradle
+        run: |
+          cat >> android/gradle.properties << EOF
+          FINSTATS_UPLOAD_STORE_FILE=release.keystore
+          FINSTATS_UPLOAD_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}
+          FINSTATS_UPLOAD_STORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          FINSTATS_UPLOAD_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
+      - name: Apontar o build de release para o keystore
+        run: |
+          python3 - << 'PYEOF'
+          import re
+          caminho = 'android/app/build.gradle'
+          with open(caminho, 'r') as f:
+              conteudo = f.read()
+          bloco = '''
+            release {
+                storeFile file(FINSTATS_UPLOAD_STORE_FILE)
+                storePassword FINSTATS_UPLOAD_STORE_PASSWORD
+                keyAlias FINSTATS_UPLOAD_KEY_ALIAS
+                keyPassword FINSTATS_UPLOAD_KEY_PASSWORD
+            }
+          '''
+          conteudo = re.sub(r'(signingConfigs\s*\{)', r'\1' + bloco, conteudo, count=1)
+          conteudo = conteudo.replace(
+              'signingConfig signingConfigs.debug',
+              'signingConfig signingConfigs.release'
+          )
+          with open(caminho, 'w') as f:
+              f.write(conteudo)
+          print('build.gradle ajustado para assinar o release')
+          PYEOF
+
+      - name: Build do APK (Gradle)
+        run: |
+          cd android
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Ler versao do app (app.json)
+        id: ler_versao
+        run: echo "versao=$(jq -r .expo.version app.json)" >> $GITHUB_OUTPUT
+
+      - name: Renomear APK
+        run: mv android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/finstats-v${{ steps.ler_versao.outputs.versao }}.apk
+
+      - name: Publicar release neste repositorio
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ler_versao.outputs.versao }}
+          name: 'FinStats - v${{ steps.ler_versao.outputs.versao }}'
+          body: |
+            Nova versao do FinStats disponivel.
+            Baixe o APK abaixo e instale no Android.
+          files: android/app/build/outputs/apk/release/finstats-v${{ steps.ler_versao.outputs.versao }}.apk
