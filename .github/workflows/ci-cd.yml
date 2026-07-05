@@ -36,7 +36,20 @@ jobs:
         run: npx expo prebuild --platform android --no-install
 
       - name: Restaurar o keystore de assinatura
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+        run: |
+          # -w0 evita quebras de linha; ignoramos espacos ao decodificar
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | tr -d '[:space:]' | base64 -d > android/app/release.keystore
+          echo "Tamanho do keystore restaurado:"
+          ls -l android/app/release.keystore
+
+      - name: Verificar o keystore e a senha
+        run: |
+          # testa se a senha abre o keystore ANTES de compilar (falha rapido e claro)
+          keytool -list -keystore android/app/release.keystore \
+            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+            && echo "OK: senha e alias conferem" \
+            || (echo "ERRO: senha ou alias nao conferem com o keystore" && exit 1)
 
       - name: Configurar a assinatura no Gradle
         run: |
