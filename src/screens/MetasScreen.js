@@ -7,7 +7,7 @@ import { useStore, resumoMes, gastoCategoriaMes, totalInvestidoMes } from '../li
 import { brl, mesAtual, parseValor, num } from '../lib/utils';
 import { SeletorMes, Progresso, IconeCat, Vazio, Botao } from '../lib/ui';
 
-export default function MetasScreen() {
+export default function MetasScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { dados, addMeta, editMeta, delMeta } = useStore();
   const [mes, setMes] = useState(mesAtual());
@@ -29,9 +29,9 @@ export default function MetasScreen() {
     return dados.metas.map((m) => {
       let atual = 0, alvoValor = 0;
       if (m.tipo === 'investir') {
-        atual = totalInvestidoMes(dados.transacoes, mes);
+        atual = totalInvestidoMes(dados.investimentos, mes);
         alvoValor = m.modo === 'percent'
-          ? (resumoMes(dados.transacoes, mes).entradas * m.alvo) / 100
+          ? (resumoMes(dados.transacoes, mes, dados.investimentos).entradas * m.alvo) / 100
           : m.alvo;
       } else {
         atual = gastoCategoriaMes(dados.transacoes, m.categoria, mes);
@@ -67,7 +67,12 @@ export default function MetasScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: C.bg, paddingTop: insets.top + 12 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 18, marginBottom: 12 }}>
-        <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 24 }}>Metas</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity onPress={() => navigation.goBack()} hitSlop={10} style={{ marginRight: 10 }}>
+            <MaterialCommunityIcons name="arrow-left" size={26} color={C.text} />
+          </TouchableOpacity>
+          <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 24 }}>Metas</Text>
+        </View>
         <TouchableOpacity onPress={abrirNovo} style={{
           flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: C.primary,
           paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20 }}>
@@ -129,9 +134,14 @@ export default function MetasScreen() {
           <TouchableOpacity activeOpacity={1} onPress={() => setModal(false)} style={{ flex: 1, backgroundColor: '#000a' }} />
           <ScrollView style={{ maxHeight: '88%' }} keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: Math.max(insets.bottom, 20) }}>
-            <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18, marginBottom: 16 }}>
-              {editId ? 'Editar meta' : 'Nova meta'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18 }}>
+                {editId ? 'Editar meta' : 'Nova meta'}
+              </Text>
+              <TouchableOpacity onPress={() => setModal(false)} hitSlop={10}>
+                <MaterialCommunityIcons name="close" size={24} color={C.muted} />
+              </TouchableOpacity>
+            </View>
 
             {/* tipo de meta */}
             <View style={{ flexDirection: 'row', backgroundColor: C.cardSoft, borderRadius: 12, padding: 4, marginBottom: 18 }}>

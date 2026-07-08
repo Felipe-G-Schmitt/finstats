@@ -3,7 +3,7 @@ import { useState, useMemo } from 'react';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, F } from '../lib/theme';
-import { useStore, resumoMes, gastoCategoriaMes, totalInvestidoMes } from '../lib/store';
+import { useStore, resumoMes, gastoCategoriaMes, totalInvestidoMes, patrimonioInvestido, fixosDoMes } from '../lib/store';
 import { brl, mesAtual, diaMesExtenso, rotuloMes } from '../lib/utils';
 import { SeletorMes, Progresso, IconeCat, TituloSecao, Vazio } from '../lib/ui';
 
@@ -18,7 +18,8 @@ export default function HomeScreen({ navigation }) {
     return m;
   }, [dados.categorias]);
 
-  const resumo = useMemo(() => resumoMes(dados.transacoes, mes), [dados.transacoes, mes]);
+  const resumo = useMemo(() => resumoMes(dados.transacoes, mes, dados.investimentos), [dados.transacoes, mes, dados.investimentos]);
+  const patrimonio = useMemo(() => patrimonioInvestido(dados.investimentos), [dados.investimentos]);
 
   // orcamentos com progresso
   const orcamentos = useMemo(() => {
@@ -38,9 +39,9 @@ export default function HomeScreen({ navigation }) {
     return dados.metas.map((m) => {
       let atual = 0, alvoValor = 0;
       if (m.tipo === 'investir') {
-        atual = totalInvestidoMes(dados.transacoes, mes);
+        atual = totalInvestidoMes(dados.investimentos, mes);
         alvoValor = m.modo === 'percent'
-          ? (resumoMes(dados.transacoes, mes).entradas * m.alvo) / 100
+          ? (resumoMes(dados.transacoes, mes, dados.investimentos).entradas * m.alvo) / 100
           : m.alvo;
       } else { // limite_categoria
         atual = gastoCategoriaMes(dados.transacoes, m.categoria, mes);
@@ -49,6 +50,12 @@ export default function HomeScreen({ navigation }) {
       return { ...m, atual, alvoValor, cat: catPorId[m.categoria] };
     });
   }, [dados.metas, dados.transacoes, mes, catPorId]);
+
+  const fixos = useMemo(
+    () => fixosDoMes(dados.categorias, dados.transacoes, dados.fixosPagos, mes),
+    [dados.categorias, dados.transacoes, dados.fixosPagos, mes]
+  );
+  const fixosPagos = fixos.filter((f) => f.pago).length;
 
   const ultimas = useMemo(
     () => dados.transacoes.filter((t) => t.data.slice(0, 7) === mes).slice(0, 5),
@@ -63,12 +70,18 @@ export default function HomeScreen({ navigation }) {
           <Text style={{ color: C.muted, fontSize: 14 }}>Seu dinheiro</Text>
           <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 26 }}>FinStats 💸</Text>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+          <TouchableOpacity onPress={() => navigation.navigate('Fixos')} style={{ padding: 4 }}>
+            <MaterialCommunityIcons name="playlist-check" size={25} color={C.text} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('Metas')} style={{ padding: 4 }}>
+            <MaterialCommunityIcons name="flag-outline" size={24} color={C.text} />
+          </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate('Graficos')} style={{ padding: 4 }}>
-            <MaterialCommunityIcons name="chart-pie" size={25} color={C.text} />
+            <MaterialCommunityIcons name="chart-pie" size={24} color={C.text} />
           </TouchableOpacity>
           <TouchableOpacity onPress={() => navigation.navigate('Ajustes')} style={{ padding: 4 }}>
-            <MaterialCommunityIcons name="cog-outline" size={26} color={C.text} />
+            <MaterialCommunityIcons name="cog-outline" size={25} color={C.text} />
           </TouchableOpacity>
         </View>
       </View>
@@ -87,7 +100,42 @@ export default function HomeScreen({ navigation }) {
           <Resumo icone="arrow-down-circle" cor={C.receita} label="Entradas" valor={resumo.entradas} />
           <Resumo icone="arrow-up-circle" cor={C.despesa} label="Saídas" valor={resumo.saidas} />
         </View>
+        {resumo.aportesRecentes > 0 && (
+          <Text style={{ color: C.mutedDim, fontSize: 11, marginTop: 10 }}>
+            Inclui {brl(resumo.aportesRecentes)} aportados este mês (descontados do saldo).
+          </Text>
+        )}
       </View>
+
+      {/* card de patrimonio investido (separado do fluxo do mes) */}
+      <TouchableOpacity activeOpacity={0.85} onPress={() => navigation.navigate('Tabs', { screen: 'Investir' })}
+        style={{ backgroundColor: C.card, borderRadius: 20, padding: 18, marginBottom: 16, flexDirection: 'row', alignItems: 'center' }}>
+        <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: C.primarySoft, justifyContent: 'center', alignItems: 'center' }}>
+          <MaterialCommunityIcons name="chart-areaspline" size={26} color={C.primary} />
+        </View>
+        <View style={{ flex: 1, marginLeft: 14 }}>
+          <Text style={{ color: C.muted, fontSize: 13 }}>Patrimônio investido</Text>
+          <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 24 }}>{brl(patrimonio)}</Text>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={24} color={C.muted} />
+      </TouchableOpacity>
+
+      {/* gastos fixos (checklist) */}
+      {fixos.length > 0 && (
+        <TouchableOpacity activeOpacity={0.85} onPress={() => navigation.navigate('Fixos')}
+          style={{ backgroundColor: C.card, borderRadius: 20, padding: 18, marginBottom: 16, flexDirection: 'row', alignItems: 'center' }}>
+          <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: fixosPagos === fixos.length ? C.primarySoft : C.alertaSoft, justifyContent: 'center', alignItems: 'center' }}>
+            <MaterialCommunityIcons name="playlist-check" size={26} color={fixosPagos === fixos.length ? C.primary : C.alerta} />
+          </View>
+          <View style={{ flex: 1, marginLeft: 14 }}>
+            <Text style={{ color: C.muted, fontSize: 13 }}>Gastos fixos do mês</Text>
+            <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18 }}>
+              {fixosPagos} de {fixos.length} pagos
+            </Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={24} color={C.muted} />
+        </TouchableOpacity>
+      )}
 
       {/* orcamentos */}
       {orcamentos.length > 0 && (
@@ -126,7 +174,7 @@ export default function HomeScreen({ navigation }) {
         <View style={{ marginBottom: 8 }}>
           <TituloSecao
             acao={
-              <TouchableOpacity onPress={() => navigation.navigate('Tabs', { screen: 'Metas' })}>
+              <TouchableOpacity onPress={() => navigation.navigate('Metas')}>
                 <Text style={{ color: C.primary, fontFamily: F.bold, fontSize: 13 }}>Ver todas</Text>
               </TouchableOpacity>
             }

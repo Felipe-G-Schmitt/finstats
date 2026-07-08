@@ -1,67 +1,77 @@
 # FinStats 💸
 
-App de finanças pessoais em React Native / Expo, com **armazenamento 100% local** (AsyncStorage) e **export/import** de backup em `.json`. Mesma arquitetura e identidade visual do Gym Stats (tema dark verde-limão, fonte Geist, tab bar com botão central flutuante).
+App de finanças pessoais em React Native / Expo (SDK 54), com **armazenamento 100% local** (AsyncStorage) e **export/import** de backup em `.json`. Tema dark verde-limão, fonte Geist, tab bar com botão central flutuante.
 
 ## Como rodar
 
 ```bash
 npm install
-npx expo start
+npx expo start -c
 ```
 
-Abra no Expo Go (Android/iOS) ou rode `npm run android` / `npm run ios`.
+Abra no Expo Go (Android/iOS) ou `npm run android` / `npm run ios`.
 
-> Requer **Expo SDK 54**. As libs de gráfico (`react-native-gifted-charts` + `react-native-svg`) já estão no `package.json`. Se o Metro reclamar de versão do svg, rode `npx expo install react-native-svg` para casar com o SDK.
+### ⚠️ Dependências novas na v1.1 (drag-and-drop)
 
-## O que tem
+A reordenação de categorias usa `react-native-draggable-flatlist`, que precisa de `gesture-handler` + `reanimated` + `worklets`. Se você atualizou de uma versão anterior, rode o instalador do Expo pra casar as versões certas com o SDK 54:
 
-- **Adicionar rápido** (`AddScreen`): o coração do app. Botão `+` central → tela com teclado numérico próprio, toggle Despesa/Receita, grid de categorias e data (default = hoje). Mínimo de toques: valor → categoria → adicionar.
-- **Home**: saldo do mês no topo (entradas, saídas, saldo), resumo de orçamentos com alerta, metas e últimas transações. Navegação de mês com `< >`.
-- **Histórico**: lista agrupada por dia, com filtro por **mês**, por **tipo** (receita/despesa) e por **categoria** (chips).
-- **Gráficos**: pizza (donut) de gastos por categoria no mês + barras de evolução dos últimos 6 meses (entradas vs saídas).
-- **Orçamentos**: limite mensal por categoria, barra de progresso e alerta visual (amarelo ≥80%, vermelho ao estourar).
-- **Metas**: "investir X% da renda ou R$ X no mês" e "gastar no máximo R$ X em tal categoria", com progresso.
-- **Categorias**: 16 pré-definidas + criação/edição livre (nome, tipo, ícone, cor) em Ajustes.
-- **Backup**: exportar gera `finstats-backup-AAAA-MM-DD.json` (abre a folha de compartilhamento → salva no Drive/WhatsApp/etc). Importar lê um `.json` e permite **mesclar** ou **substituir tudo**.
+```bash
+npx expo install react-native-gesture-handler react-native-reanimated react-native-worklets react-native-draggable-flatlist
+npx expo start -c
+```
+
+> No SDK 54 **não** se adiciona o plugin do reanimated no `babel.config.js` — o `babel-preset-expo` já configura isso sozinho. O `babel.config.js` fica só com o preset. O `-c` limpa o cache do Metro.
+
+## Novidades da v1.1
+
+- **Investimentos separados (aba Investir).** Patrimônio investido é um total à parte, que não entra no saldo do mês. Cada aporte é marcado como:
+  - **Recente** → saiu da conta agora, desconta do saldo do mês (transferência real).
+  - **Histórico** → dinheiro já investido antes, só soma no patrimônio, sem mexer no saldo.
+  Assim seus ~10K acumulados não quebram mais o saldo atual. Lançamento aporte a aporte, com editar e excluir.
+- **Gastos fixos vs. variáveis + checklist.** Categorias de despesa têm a marca fixo/variável (nos Ajustes). A tela **Gastos fixos** (atalho na Home e nos Ajustes) é um checklist mensal: ao registrar uma despesa numa categoria fixa, ela marca sozinha; dá pra marcar manualmente também (quando pagou mas não quer lançar a transação).
+- **Excluir transações.** Ao editar uma receita/despesa, tem lixeira no topo (com confirmação). O mesmo vale para aportes e metas.
+- **Arrastar pra reordenar categorias.** Nos Ajustes, segure e arraste (ou use a alça ⠿) pra mudar a ordem — reflete na tela de adicionar e nos filtros.
+- **X pra fechar os modais** de categoria, orçamento e meta.
+
+## Modelo de dados (backup .json)
+
+```json
+{
+  "schema": 2,
+  "transacoes":    [{ "id", "tipo", "valor", "data", "categoria", "descricao" }],
+  "categorias":    [{ "id", "nome", "icone", "cor", "tipo", "fixo", "ordem" }],
+  "orcamentos":    [{ "id", "categoria", "limite", "mes" }],
+  "metas":         [{ "id", "tipo", "alvo", "modo", "categoria" }],
+  "investimentos": [{ "id", "valor", "data", "ativo", "recente" }],
+  "fixosPagos":    { "YYYY-MM": { "categoriaId": "txId | true" } }
+}
+```
+
+Backups da v1 (schema 1) são migrados automaticamente: categorias ganham `ordem`, e os campos novos (`investimentos`, `fixosPagos`) entram vazios.
 
 ## Estrutura
 
 ```
-App.js                 fontes + StoreProvider
-Navigation.js          stack + tabs + botão central (+)
+App.js                 GestureHandlerRootView + fontes + StoreProvider
+Navigation.js          stack + tabs (Início, Histórico, +, Orçam., Investir)
 src/lib/
-  store.js             Context global, persistência AsyncStorage, export/import, seletores
-  theme.js             tokens de cor/fonte + paleta de gráficos
-  utils.js             moeda BRL, datas, ids (funções puras)
-  categories.js        categorias e ícones padrão
-  ui.js                componentes reutilizáveis (Progresso, SeletorMes, etc)
-  backup.js            escrita/leitura de arquivo (expo-file-system + sharing + document-picker)
+  store.js             Context, persistência, export/import, seletores
+  theme.js             tokens de cor/fonte
+  utils.js             moeda BRL, datas, ids
+  categories.js        categorias padrão (com flag fixo)
+  ui.js                componentes reutilizáveis
+  backup.js            arquivo (file-system + sharing + document-picker)
 src/screens/
-  AddScreen.js         lançamento rápido
-  HomeScreen.js        dashboard
+  AddScreen.js         lançamento rápido + excluir
+  HomeScreen.js        dashboard (saldo, patrimônio, fixos, orçam., metas)
   HistoricoScreen.js   lista + filtros
   GraficosScreen.js    pizza + barras
   OrcamentosScreen.js  limites por categoria
   MetasScreen.js       metas
-  DateScreen.js        calendário simples (sem libs)
-  AjustesScreen.js     categorias + backup + reset
+  InvestirScreen.js    patrimônio + aportes (recente/histórico)
+  FixosScreen.js       checklist mensal de gastos fixos
+  DateScreen.js        calendário
+  AjustesScreen.js     categorias (drag), fixo/variável, backup, reset
 ```
 
-## Formato do backup
-
-```json
-{
-  "schema": 1,
-  "transacoes": [{ "id", "tipo", "valor", "data", "categoria", "descricao" }],
-  "categorias": [{ "id", "nome", "icone", "cor", "tipo" }],
-  "orcamentos": [{ "id", "categoria", "limite", "mes" }],
-  "metas": [{ "id", "tipo", "alvo", "modo", "categoria" }]
-}
-```
-
-O `migrar()` no `store.js` deixa o import tolerante a backups antigos/parciais.
-
-## Notas
-
-- Aportes de investimento: lance como **despesa** na categoria "Investimento" (ou marque `investimento: true`); a meta de investir soma essas transações no mês.
-- Tudo fica só no aparelho — sem login, sem servidor. Exporte de vez em quando pra não perder.
+Tudo fica só no aparelho — sem login, sem servidor. Exporte de vez em quando pra não perder.

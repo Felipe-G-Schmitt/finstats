@@ -120,9 +120,14 @@ export default function OrcamentosScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1, justifyContent: 'flex-end' }}>
           <TouchableOpacity activeOpacity={1} onPress={() => setModal(false)} style={{ flex: 1, backgroundColor: '#000a' }} />
           <View style={{ backgroundColor: C.card, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: Math.max(insets.bottom, 20) }}>
-            <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18, marginBottom: 16 }}>
-              {catModal ? `Orçamento — ${catModal.nome}` : 'Novo orçamento'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18 }}>
+                {catModal ? `Orçamento — ${catModal.nome}` : 'Novo orçamento'}
+              </Text>
+              <TouchableOpacity onPress={() => setModal(false)} hitSlop={10}>
+                <MaterialCommunityIcons name="close" size={24} color={C.muted} />
+              </TouchableOpacity>
+            </View>
 
             {/* escolher categoria (so se for novo) */}
             {!catModal && (

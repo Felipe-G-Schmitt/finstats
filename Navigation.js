@@ -13,6 +13,8 @@ import HistoricoScreen from './src/screens/HistoricoScreen';
 import GraficosScreen from './src/screens/GraficosScreen';
 import OrcamentosScreen from './src/screens/OrcamentosScreen';
 import MetasScreen from './src/screens/MetasScreen';
+import InvestirScreen from './src/screens/InvestirScreen';
+import FixosScreen from './src/screens/FixosScreen';
 import AddScreen from './src/screens/AddScreen';
 import DateScreen from './src/screens/DateScreen';
 import AjustesScreen from './src/screens/AjustesScreen';
@@ -23,16 +25,15 @@ const Tab = createBottomTabNavigator();
 const ABAS = {
   Home: { icone: 'view-dashboard-outline', label: 'Início' },
   Historico: { icone: 'format-list-bulleted', label: 'Histórico' },
-  Graficos: { icone: 'chart-pie', label: 'Gráficos' },
   Orcamentos: { icone: 'wallet-outline', label: 'Orçam.' },
-  Metas: { icone: 'flag-outline', label: 'Metas' },
+  Investir: { icone: 'chart-areaspline', label: 'Investir' },
 };
 
-// Tab bar: Home, Historico, [ + ], Orcamentos, Metas  (Graficos acessivel pela home/atalho)
+// Tab bar: Home, Historico, [ + ], Orcamentos, Investir
 function TabBar({ state, navigation }) {
   const insets = useSafeAreaInsets();
   const esquerda = ['Home', 'Historico'];
-  const direita = ['Orcamentos', 'Metas'];
+  const direita = ['Orcamentos', 'Investir'];
 
   const item = (nome) => {
     const rotaIdx = state.routes.findIndex((r) => r.name === nome);
@@ -81,7 +82,7 @@ function Tabs() {
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Historico" component={HistoricoScreen} />
       <Tab.Screen name="Orcamentos" component={OrcamentosScreen} />
-      <Tab.Screen name="Metas" component={MetasScreen} />
+      <Tab.Screen name="Investir" component={InvestirScreen} />
     </Tab.Navigator>
   );
 }
@@ -105,6 +106,8 @@ export default function RootNavigation() {
       <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg } }}>
         <Stack.Screen name="Tabs" component={Tabs} />
         <Stack.Screen name="Graficos" component={GraficosScreen} />
+        <Stack.Screen name="Metas" component={MetasScreen} />
+        <Stack.Screen name="Fixos" component={FixosScreen} />
         <Stack.Screen name="Add" component={AddScreen} options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="SelecionarData" component={DateScreen} options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Ajustes" component={AjustesScreen} />

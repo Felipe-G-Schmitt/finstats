@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, ScrollView, TextInput, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, TextInput, Platform, Alert } from 'react-native';
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,12 +12,14 @@ const TECLAS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'del'];
 
 export default function AddScreen({ navigation, route }) {
   const insets = useSafeAreaInsets();
-  const { dados, addTransacao, editTransacao } = useStore();
+  const { dados, addTransacao, editTransacao, delTransacao } = useStore();
   const editando = route.params?.transacao || null;
+  const presetCategoria = route.params?.presetCategoria || null;
+  const presetTipo = route.params?.presetTipo || null;
 
-  const [tipo, setTipo] = useState(editando?.tipo || 'despesa');
+  const [tipo, setTipo] = useState(editando?.tipo || presetTipo || 'despesa');
   const [valorStr, setValorStr] = useState(editando ? num(editando.valor) : '0,00');
-  const [categoria, setCategoria] = useState(editando?.categoria || null);
+  const [categoria, setCategoria] = useState(editando?.categoria || presetCategoria || null);
   const [descricao, setDescricao] = useState(editando?.descricao || '');
   const [data, setData] = useState(editando?.data || hojeISO());
   const [digitando, setDigitando] = useState(!!editando); // edicao: ja parte do valor existente
@@ -70,6 +72,17 @@ export default function AddScreen({ navigation, route }) {
     navigation.goBack();
   }
 
+  function excluir() {
+    Alert.alert(
+      'Excluir transação',
+      `Remover esta ${editando.tipo === 'receita' ? 'receita' : 'despesa'} de ${num(editando.valor)}? Não dá pra desfazer.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Excluir', style: 'destructive', onPress: () => { delTransacao(editando.id); navigation.goBack(); } },
+      ]
+    );
+  }
+
   const podeConfirmar = valorNum > 0 && !!categoria;
 
   return (
@@ -95,6 +108,11 @@ export default function AddScreen({ navigation, route }) {
             );
           })}
         </View>
+        {editando && (
+          <TouchableOpacity onPress={excluir} hitSlop={10} style={{ padding: 6, marginLeft: 6 }}>
+            <MaterialCommunityIcons name="trash-can-outline" size={24} color={C.despesa} />
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* valor grande */}

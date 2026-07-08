@@ -5,37 +5,37 @@ import { CATEGORIAS_PADRAO } from './categories';
 import { uid, mesDe } from './utils';
 
 const CHAVE = '@finstats/dados/v1';
-const SCHEMA = 1;
+const SCHEMA = 2;
 
-// estado inicial (primeira vez que abre o app)
 function estadoInicial() {
   return {
     schema: SCHEMA,
     criadoEm: new Date().toISOString(),
-    transacoes: [],          // {id, tipo:'receita'|'despesa', valor, data:'YYYY-MM-DD', categoria, descricao, criadoEm}
-    categorias: CATEGORIAS_PADRAO.map((c) => ({ ...c, padrao: true })),
-    orcamentos: [],          // {id, categoria, limite, mes:'YYYY-MM'|null(recorrente)}
-    metas: [],               // {id, tipo:'investir'|'limite_categoria', alvo, modo:'percent'|'valor', categoria?, mes}
+    transacoes: [],
+    categorias: CATEGORIAS_PADRAO.map((c, i) => ({ ...c, padrao: true, ordem: i })),
+    orcamentos: [],
+    metas: [],
+    // aportes de investimento — patrimonio separado do fluxo do mes
+    // {id, valor, data, descricao, ativo, recente}
+    //   recente=true  -> saiu da conta agora (reduz o saldo do mes)
+    //   recente=false -> aporte historico, so soma no patrimonio
+    investimentos: [],
+    // { 'YYYY-MM': { categoriaId: txId | true } }
+    fixosPagos: {},
   };
 }
 
 const StoreContext = createContext(null);
 
 export function StoreProvider({ children }) {
-  const [dados, setDados] = useState(null);   // null = carregando
+  const [dados, setDados] = useState(null);
   const [pronto, setPronto] = useState(false);
 
-  // carrega do disco
   useEffect(() => {
     (async () => {
       try {
         const raw = await AsyncStorage.getItem(CHAVE);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          setDados(migrar(parsed));
-        } else {
-          setDados(estadoInicial());
-        }
+        setDados(raw ? migrar(JSON.parse(raw)) : estadoInicial());
       } catch (e) {
         setDados(estadoInicial());
       } finally {
@@ -44,13 +44,11 @@ export function StoreProvider({ children }) {
     })();
   }, []);
 
-  // persiste sempre que muda
   const persistir = useCallback(async (novo) => {
     setDados(novo);
     try { await AsyncStorage.setItem(CHAVE, JSON.stringify(novo)); } catch (e) {}
   }, []);
 
-  // helper p/ atualizar via funcao
   const atualizar = useCallback((fn) => {
     setDados((atual) => {
       const novo = fn(atual);
@@ -61,13 +59,24 @@ export function StoreProvider({ children }) {
 
   // ---------- TRANSACOES ----------
   const addTransacao = useCallback((t) => {
-    atualizar((d) => ({
-      ...d,
-      transacoes: [
-        { id: uid(), criadoEm: new Date().toISOString(), ...t, valor: Math.abs(Number(t.valor) || 0) },
-        ...d.transacoes,
-      ],
-    }));
+    const novaId = uid();
+    atualizar((d) => {
+      let fixosPagos = d.fixosPagos;
+      const cat = d.categorias.find((c) => c.id === t.categoria);
+      if (cat && cat.tipo === 'despesa' && cat.fixo) {
+        const ym = mesDe(t.data);
+        fixosPagos = { ...fixosPagos, [ym]: { ...(fixosPagos[ym] || {}), [t.categoria]: novaId } };
+      }
+      return {
+        ...d,
+        transacoes: [
+          { id: novaId, criadoEm: new Date().toISOString(), ...t, valor: Math.abs(Number(t.valor) || 0) },
+          ...d.transacoes,
+        ],
+        fixosPagos,
+      };
+    });
+    return novaId;
   }, [atualizar]);
 
   const editTransacao = useCallback((id, patch) => {
@@ -80,12 +89,27 @@ export function StoreProvider({ children }) {
   }, [atualizar]);
 
   const delTransacao = useCallback((id) => {
-    atualizar((d) => ({ ...d, transacoes: d.transacoes.filter((t) => t.id !== id) }));
+    atualizar((d) => {
+      const fixosPagos = { ...d.fixosPagos };
+      for (const ym of Object.keys(fixosPagos)) {
+        const mesObj = fixosPagos[ym];
+        for (const catId of Object.keys(mesObj)) {
+          if (mesObj[catId] === id) {
+            const novo = { ...mesObj }; delete novo[catId];
+            fixosPagos[ym] = novo;
+          }
+        }
+      }
+      return { ...d, transacoes: d.transacoes.filter((t) => t.id !== id), fixosPagos };
+    });
   }, [atualizar]);
 
   // ---------- CATEGORIAS ----------
   const addCategoria = useCallback((c) => {
-    atualizar((d) => ({ ...d, categorias: [...d.categorias, { id: uid(), padrao: false, ...c }] }));
+    atualizar((d) => {
+      const maxOrdem = d.categorias.reduce((m, x) => Math.max(m, x.ordem ?? 0), 0);
+      return { ...d, categorias: [...d.categorias, { id: uid(), padrao: false, ordem: maxOrdem + 1, ...c }] };
+    });
   }, [atualizar]);
 
   const editCategoria = useCallback((id, patch) => {
@@ -100,8 +124,20 @@ export function StoreProvider({ children }) {
     }));
   }, [atualizar]);
 
+  const reordenarCategorias = useCallback((tipo, listaOrdenada) => {
+    atualizar((d) => {
+      const ordemPorId = {};
+      listaOrdenada.forEach((c, i) => { ordemPorId[c.id] = i; });
+      return {
+        ...d,
+        categorias: d.categorias.map((c) =>
+          c.tipo === tipo && ordemPorId[c.id] != null ? { ...c, ordem: ordemPorId[c.id] } : c
+        ),
+      };
+    });
+  }, [atualizar]);
+
   // ---------- ORCAMENTOS ----------
-  // um orcamento por categoria (recorrente, mes=null). upsert.
   const setOrcamento = useCallback((categoria, limite) => {
     atualizar((d) => {
       const existe = d.orcamentos.find((o) => o.categoria === categoria);
@@ -124,22 +160,52 @@ export function StoreProvider({ children }) {
   const addMeta = useCallback((m) => {
     atualizar((d) => ({ ...d, metas: [{ id: uid(), criadoEm: new Date().toISOString(), ...m }, ...d.metas] }));
   }, [atualizar]);
-
   const editMeta = useCallback((id, patch) => {
     atualizar((d) => ({ ...d, metas: d.metas.map((m) => (m.id === id ? { ...m, ...patch } : m)) }));
   }, [atualizar]);
-
   const delMeta = useCallback((id) => {
     atualizar((d) => ({ ...d, metas: d.metas.filter((m) => m.id !== id) }));
   }, [atualizar]);
 
+  // ---------- INVESTIMENTOS (patrimonio) ----------
+  const addInvestimento = useCallback((inv) => {
+    atualizar((d) => ({
+      ...d,
+      investimentos: [
+        { id: uid(), criadoEm: new Date().toISOString(), ...inv, valor: Math.abs(Number(inv.valor) || 0) },
+        ...d.investimentos,
+      ],
+    }));
+  }, [atualizar]);
+
+  const editInvestimento = useCallback((id, patch) => {
+    atualizar((d) => ({
+      ...d,
+      investimentos: d.investimentos.map((i) =>
+        i.id === id ? { ...i, ...patch, valor: patch.valor != null ? Math.abs(Number(patch.valor) || 0) : i.valor } : i
+      ),
+    }));
+  }, [atualizar]);
+
+  const delInvestimento = useCallback((id) => {
+    atualizar((d) => ({ ...d, investimentos: d.investimentos.filter((i) => i.id !== id) }));
+  }, [atualizar]);
+
+  // ---------- CHECKLIST DE FIXOS ----------
+  const toggleFixoPago = useCallback((categoriaId, ym) => {
+    atualizar((d) => {
+      const mesObj = { ...(d.fixosPagos[ym] || {}) };
+      if (mesObj[categoriaId]) delete mesObj[categoriaId];
+      else mesObj[categoriaId] = true;
+      return { ...d, fixosPagos: { ...d.fixosPagos, [ym]: mesObj } };
+    });
+  }, [atualizar]);
+
   // ---------- EXPORT / IMPORT ----------
-  // gera o objeto exportavel (JSON string)
   const exportarJSON = useCallback(() => {
     return JSON.stringify({ ...dados, exportadoEm: new Date().toISOString(), app: 'FinStats' }, null, 2);
   }, [dados]);
 
-  // recebe string JSON, valida e substitui (ou mescla)
   const importarJSON = useCallback(async (texto, modo = 'substituir') => {
     let parsed;
     try { parsed = JSON.parse(texto); } catch { throw new Error('Arquivo inválido (JSON corrompido).'); }
@@ -152,19 +218,21 @@ export function StoreProvider({ children }) {
       const novasTx = limpo.transacoes.filter((t) => !idsExist.has(t.id));
       const catIds = new Set(dados.categorias.map((c) => c.id));
       const novasCat = limpo.categorias.filter((c) => !catIds.has(c.id));
+      const invIds = new Set(dados.investimentos.map((i) => i.id));
+      const novosInv = limpo.investimentos.filter((i) => !invIds.has(i.id));
       const merged = {
         ...dados,
         transacoes: [...novasTx, ...dados.transacoes],
         categorias: [...dados.categorias, ...novasCat],
+        investimentos: [...novosInv, ...dados.investimentos],
       };
       await persistir(merged);
-      return { transacoes: novasTx.length, categorias: novasCat.length };
+      return { transacoes: novasTx.length, categorias: novasCat.length, investimentos: novosInv.length };
     }
     await persistir(limpo);
-    return { transacoes: limpo.transacoes.length, categorias: limpo.categorias.length };
+    return { transacoes: limpo.transacoes.length, categorias: limpo.categorias.length, investimentos: limpo.investimentos.length };
   }, [dados, persistir]);
 
-  // apaga tudo
   const resetar = useCallback(async () => {
     await persistir(estadoInicial());
   }, [persistir]);
@@ -172,12 +240,16 @@ export function StoreProvider({ children }) {
   const valor = useMemo(() => ({
     dados, pronto,
     addTransacao, editTransacao, delTransacao,
-    addCategoria, editCategoria, delCategoria,
+    addCategoria, editCategoria, delCategoria, reordenarCategorias,
     setOrcamento,
     addMeta, editMeta, delMeta,
+    addInvestimento, editInvestimento, delInvestimento,
+    toggleFixoPago,
     exportarJSON, importarJSON, resetar,
   }), [dados, pronto, addTransacao, editTransacao, delTransacao, addCategoria, editCategoria,
-       delCategoria, setOrcamento, addMeta, editMeta, delMeta, exportarJSON, importarJSON, resetar]);
+       delCategoria, reordenarCategorias, setOrcamento, addMeta, editMeta, delMeta,
+       addInvestimento, editInvestimento, delInvestimento, toggleFixoPago,
+       exportarJSON, importarJSON, resetar]);
 
   return <StoreContext.Provider value={valor}>{children}</StoreContext.Provider>;
 }
@@ -188,37 +260,43 @@ export function useStore() {
   return ctx;
 }
 
-// migra backups antigos p/ o schema atual (defensivo)
 function migrar(d) {
   const base = estadoInicial();
+  let categorias = Array.isArray(d.categorias) && d.categorias.length ? d.categorias : base.categorias;
+  categorias = categorias.map((c, i) => ({ ...c, ordem: c.ordem ?? i }));
   return {
     ...base,
     ...d,
     schema: SCHEMA,
     transacoes: Array.isArray(d.transacoes) ? d.transacoes : [],
-    categorias: Array.isArray(d.categorias) && d.categorias.length ? d.categorias : base.categorias,
+    categorias,
     orcamentos: Array.isArray(d.orcamentos) ? d.orcamentos : [],
     metas: Array.isArray(d.metas) ? d.metas : [],
+    investimentos: Array.isArray(d.investimentos) ? d.investimentos : [],
+    fixosPagos: d.fixosPagos && typeof d.fixosPagos === 'object' ? d.fixosPagos : {},
   };
 }
 
-// ============ SELETORES (funcoes puras usadas pelas telas) ============
+// ============ SELETORES ============
 
 export function txDoMes(transacoes, ym) {
   return transacoes.filter((t) => mesDe(t.data) === ym);
 }
 
-export function resumoMes(transacoes, ym) {
+// aportes recentes reduzem o saldo do mes (dinheiro que saiu da conta)
+export function resumoMes(transacoes, ym, investimentos = []) {
   const tx = txDoMes(transacoes, ym);
   let entradas = 0, saidas = 0;
   for (const t of tx) {
     if (t.tipo === 'receita') entradas += Number(t.valor) || 0;
     else saidas += Number(t.valor) || 0;
   }
-  return { entradas, saidas, saldo: entradas - saidas, qtd: tx.length };
+  const aportesRecentes = investimentos
+    .filter((i) => i.recente && mesDe(i.data) === ym)
+    .reduce((s, i) => s + (Number(i.valor) || 0), 0);
+  return { entradas, saidas, aportesRecentes, saldo: entradas - saidas - aportesRecentes, qtd: tx.length };
 }
 
-// gastos por categoria no mes -> [{categoria, total}]
 export function gastosPorCategoria(transacoes, ym) {
   const tx = txDoMes(transacoes, ym).filter((t) => t.tipo === 'despesa');
   const mapa = {};
@@ -228,17 +306,32 @@ export function gastosPorCategoria(transacoes, ym) {
     .sort((a, b) => b.total - a.total);
 }
 
-// total gasto numa categoria especifica no mes
 export function gastoCategoriaMes(transacoes, categoria, ym) {
   return txDoMes(transacoes, ym)
     .filter((t) => t.tipo === 'despesa' && t.categoria === categoria)
     .reduce((s, t) => s + (Number(t.valor) || 0), 0);
 }
 
-// total investido no mes (receitas com categoria de rendimento/investimento + despesas marcadas investimento)
-// aqui consideramos transacoes do tipo despesa na categoria 'investimento' como aporte
-export function totalInvestidoMes(transacoes, ym) {
-  return txDoMes(transacoes, ym)
-    .filter((t) => t.categoria === 'investimento' || t.categoria === 'investimento_rend' || t.investimento)
-    .reduce((s, t) => s + (Number(t.valor) || 0), 0);
+// ---- investimentos ----
+export function patrimonioInvestido(investimentos = []) {
+  return investimentos.reduce((s, i) => s + (Number(i.valor) || 0), 0);
+}
+export function aportesDoMes(investimentos = [], ym) {
+  return investimentos.filter((i) => mesDe(i.data) === ym).reduce((s, i) => s + (Number(i.valor) || 0), 0);
+}
+export function totalInvestidoMes(investimentos = [], ym) {
+  return aportesDoMes(investimentos, ym);
+}
+
+// ---- gastos fixos / checklist ----
+export function fixosDoMes(categorias, transacoes, fixosPagos, ym) {
+  const fixas = categorias
+    .filter((c) => c.tipo === 'despesa' && c.fixo)
+    .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+  const pagosMes = fixosPagos[ym] || {};
+  return fixas.map((cat) => {
+    const marca = pagosMes[cat.id];
+    const gasto = gastoCategoriaMes(transacoes, cat.id, ym);
+    return { cat, pago: !!marca, valorPago: gasto, txId: typeof marca === 'string' ? marca : null };
+  });
 }
