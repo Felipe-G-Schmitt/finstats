@@ -16,11 +16,13 @@ function estadoInicial() {
     orcamentos: [],
     metas: [],
     // aportes de investimento — patrimonio separado do fluxo do mes
-    // {id, valor, data, descricao, ativo, recente}
     //   recente=true  -> saiu da conta agora (reduz o saldo do mes)
     //   recente=false -> aporte historico, so soma no patrimonio
     investimentos: [],
-    // { 'YYYY-MM': { categoriaId: txId | true } }
+    // gastos fixos = LISTA PROPRIA de itens recorrentes (ex: Aluguel, Netflix)
+    // {id, nome, valorEsperado, categoria, ordem}
+    fixos: [],
+    // pagamentos por mes: { 'YYYY-MM': { fixoId: txId } } — vinculado a uma transacao
     fixosPagos: {},
   };
 }
@@ -58,19 +60,20 @@ export function StoreProvider({ children }) {
   }, []);
 
   // ---------- TRANSACOES ----------
+  // t pode conter { fixoId } -> vincula a despesa a um gasto fixo e marca como pago no mes
   const addTransacao = useCallback((t) => {
     const novaId = uid();
     atualizar((d) => {
+      const { fixoId, ...limpo } = t;
       let fixosPagos = d.fixosPagos;
-      const cat = d.categorias.find((c) => c.id === t.categoria);
-      if (cat && cat.tipo === 'despesa' && cat.fixo) {
+      if (fixoId) {
         const ym = mesDe(t.data);
-        fixosPagos = { ...fixosPagos, [ym]: { ...(fixosPagos[ym] || {}), [t.categoria]: novaId } };
+        fixosPagos = { ...fixosPagos, [ym]: { ...(fixosPagos[ym] || {}), [fixoId]: novaId } };
       }
       return {
         ...d,
         transacoes: [
-          { id: novaId, criadoEm: new Date().toISOString(), ...t, valor: Math.abs(Number(t.valor) || 0) },
+          { id: novaId, criadoEm: new Date().toISOString(), ...limpo, fixoId: fixoId || null, valor: Math.abs(Number(t.valor) || 0) },
           ...d.transacoes,
         ],
         fixosPagos,
@@ -80,28 +83,36 @@ export function StoreProvider({ children }) {
   }, [atualizar]);
 
   const editTransacao = useCallback((id, patch) => {
-    atualizar((d) => ({
-      ...d,
-      transacoes: d.transacoes.map((t) =>
-        t.id === id ? { ...t, ...patch, valor: patch.valor != null ? Math.abs(Number(patch.valor) || 0) : t.valor } : t
-      ),
-    }));
+    atualizar((d) => {
+      const { fixoId, ...resto } = patch;
+      const antiga = d.transacoes.find((t) => t.id === id);
+      let fixosPagos = d.fixosPagos;
+      // se mudou o vinculo de fixo, atualiza o mapa de pagos
+      if (antiga && fixoId !== undefined && fixoId !== antiga.fixoId) {
+        fixosPagos = desvincularTx(fixosPagos, id);
+        if (fixoId) {
+          const ym = mesDe(patch.data || antiga.data);
+          fixosPagos = { ...fixosPagos, [ym]: { ...(fixosPagos[ym] || {}), [fixoId]: id } };
+        }
+      }
+      return {
+        ...d,
+        fixosPagos,
+        transacoes: d.transacoes.map((t) =>
+          t.id === id
+            ? { ...t, ...resto, ...(fixoId !== undefined ? { fixoId: fixoId || null } : {}), valor: patch.valor != null ? Math.abs(Number(patch.valor) || 0) : t.valor }
+            : t
+        ),
+      };
+    });
   }, [atualizar]);
 
   const delTransacao = useCallback((id) => {
-    atualizar((d) => {
-      const fixosPagos = { ...d.fixosPagos };
-      for (const ym of Object.keys(fixosPagos)) {
-        const mesObj = fixosPagos[ym];
-        for (const catId of Object.keys(mesObj)) {
-          if (mesObj[catId] === id) {
-            const novo = { ...mesObj }; delete novo[catId];
-            fixosPagos[ym] = novo;
-          }
-        }
-      }
-      return { ...d, transacoes: d.transacoes.filter((t) => t.id !== id), fixosPagos };
-    });
+    atualizar((d) => ({
+      ...d,
+      transacoes: d.transacoes.filter((t) => t.id !== id),
+      fixosPagos: desvincularTx(d.fixosPagos, id),
+    }));
   }, [atualizar]);
 
   // ---------- CATEGORIAS ----------
@@ -121,6 +132,7 @@ export function StoreProvider({ children }) {
       ...d,
       categorias: d.categorias.filter((c) => c.id !== id),
       orcamentos: d.orcamentos.filter((o) => o.categoria !== id),
+      fixos: d.fixos.filter((f) => f.categoria !== id),
     }));
   }, [atualizar]);
 
@@ -134,6 +146,68 @@ export function StoreProvider({ children }) {
           c.tipo === tipo && ordemPorId[c.id] != null ? { ...c, ordem: ordemPorId[c.id] } : c
         ),
       };
+    });
+  }, [atualizar]);
+
+  // ---------- GASTOS FIXOS (lista propria) ----------
+  const addFixo = useCallback((f) => {
+    atualizar((d) => {
+      const maxOrdem = d.fixos.reduce((m, x) => Math.max(m, x.ordem ?? 0), 0);
+      return {
+        ...d,
+        fixos: [...d.fixos, {
+          id: uid(), ordem: maxOrdem + 1,
+          nome: (f.nome || '').trim(),
+          valorEsperado: Math.abs(Number(f.valorEsperado) || 0),
+          categoria: f.categoria || null,
+        }],
+      };
+    });
+  }, [atualizar]);
+
+  const editFixo = useCallback((id, patch) => {
+    atualizar((d) => ({
+      ...d,
+      fixos: d.fixos.map((f) => (f.id === id ? {
+        ...f, ...patch,
+        valorEsperado: patch.valorEsperado != null ? Math.abs(Number(patch.valorEsperado) || 0) : f.valorEsperado,
+      } : f)),
+    }));
+  }, [atualizar]);
+
+  const delFixo = useCallback((id) => {
+    atualizar((d) => {
+      // remove o vinculo em fixosPagos e desmarca fixoId nas transacoes
+      const fixosPagos = {};
+      for (const ym of Object.keys(d.fixosPagos)) {
+        const mesObj = { ...d.fixosPagos[ym] };
+        delete mesObj[id];
+        fixosPagos[ym] = mesObj;
+      }
+      return {
+        ...d,
+        fixos: d.fixos.filter((f) => f.id !== id),
+        fixosPagos,
+        transacoes: d.transacoes.map((t) => (t.fixoId === id ? { ...t, fixoId: null } : t)),
+      };
+    });
+  }, [atualizar]);
+
+  const reordenarFixos = useCallback((listaOrdenada) => {
+    atualizar((d) => {
+      const ordemPorId = {};
+      listaOrdenada.forEach((f, i) => { ordemPorId[f.id] = i; });
+      return { ...d, fixos: d.fixos.map((f) => (ordemPorId[f.id] != null ? { ...f, ordem: ordemPorId[f.id] } : f)) };
+    });
+  }, [atualizar]);
+
+  // marca/desmarca um fixo como pago SEM transacao (avulso)
+  const toggleFixoPago = useCallback((fixoId, ym) => {
+    atualizar((d) => {
+      const mesObj = { ...(d.fixosPagos[ym] || {}) };
+      if (mesObj[fixoId]) delete mesObj[fixoId];
+      else mesObj[fixoId] = true;
+      return { ...d, fixosPagos: { ...d.fixosPagos, [ym]: mesObj } };
     });
   }, [atualizar]);
 
@@ -167,7 +241,7 @@ export function StoreProvider({ children }) {
     atualizar((d) => ({ ...d, metas: d.metas.filter((m) => m.id !== id) }));
   }, [atualizar]);
 
-  // ---------- INVESTIMENTOS (patrimonio) ----------
+  // ---------- INVESTIMENTOS ----------
   const addInvestimento = useCallback((inv) => {
     atualizar((d) => ({
       ...d,
@@ -177,7 +251,6 @@ export function StoreProvider({ children }) {
       ],
     }));
   }, [atualizar]);
-
   const editInvestimento = useCallback((id, patch) => {
     atualizar((d) => ({
       ...d,
@@ -186,19 +259,8 @@ export function StoreProvider({ children }) {
       ),
     }));
   }, [atualizar]);
-
   const delInvestimento = useCallback((id) => {
     atualizar((d) => ({ ...d, investimentos: d.investimentos.filter((i) => i.id !== id) }));
-  }, [atualizar]);
-
-  // ---------- CHECKLIST DE FIXOS ----------
-  const toggleFixoPago = useCallback((categoriaId, ym) => {
-    atualizar((d) => {
-      const mesObj = { ...(d.fixosPagos[ym] || {}) };
-      if (mesObj[categoriaId]) delete mesObj[categoriaId];
-      else mesObj[categoriaId] = true;
-      return { ...d, fixosPagos: { ...d.fixosPagos, [ym]: mesObj } };
-    });
   }, [atualizar]);
 
   // ---------- EXPORT / IMPORT ----------
@@ -220,11 +282,14 @@ export function StoreProvider({ children }) {
       const novasCat = limpo.categorias.filter((c) => !catIds.has(c.id));
       const invIds = new Set(dados.investimentos.map((i) => i.id));
       const novosInv = limpo.investimentos.filter((i) => !invIds.has(i.id));
+      const fixoIds = new Set(dados.fixos.map((f) => f.id));
+      const novosFixos = limpo.fixos.filter((f) => !fixoIds.has(f.id));
       const merged = {
         ...dados,
         transacoes: [...novasTx, ...dados.transacoes],
         categorias: [...dados.categorias, ...novasCat],
         investimentos: [...novosInv, ...dados.investimentos],
+        fixos: [...dados.fixos, ...novosFixos],
       };
       await persistir(merged);
       return { transacoes: novasTx.length, categorias: novasCat.length, investimentos: novosInv.length };
@@ -233,22 +298,20 @@ export function StoreProvider({ children }) {
     return { transacoes: limpo.transacoes.length, categorias: limpo.categorias.length, investimentos: limpo.investimentos.length };
   }, [dados, persistir]);
 
-  const resetar = useCallback(async () => {
-    await persistir(estadoInicial());
-  }, [persistir]);
+  const resetar = useCallback(async () => { await persistir(estadoInicial()); }, [persistir]);
 
   const valor = useMemo(() => ({
     dados, pronto,
     addTransacao, editTransacao, delTransacao,
     addCategoria, editCategoria, delCategoria, reordenarCategorias,
+    addFixo, editFixo, delFixo, reordenarFixos, toggleFixoPago,
     setOrcamento,
     addMeta, editMeta, delMeta,
     addInvestimento, editInvestimento, delInvestimento,
-    toggleFixoPago,
     exportarJSON, importarJSON, resetar,
   }), [dados, pronto, addTransacao, editTransacao, delTransacao, addCategoria, editCategoria,
-       delCategoria, reordenarCategorias, setOrcamento, addMeta, editMeta, delMeta,
-       addInvestimento, editInvestimento, delInvestimento, toggleFixoPago,
+       delCategoria, reordenarCategorias, addFixo, editFixo, delFixo, reordenarFixos, toggleFixoPago,
+       setOrcamento, addMeta, editMeta, delMeta, addInvestimento, editInvestimento, delInvestimento,
        exportarJSON, importarJSON, resetar]);
 
   return <StoreContext.Provider value={valor}>{children}</StoreContext.Provider>;
@@ -260,10 +323,35 @@ export function useStore() {
   return ctx;
 }
 
+// remove qualquer vinculo de uma transacao no mapa de fixosPagos
+function desvincularTx(fixosPagos, txId) {
+  const novo = {};
+  for (const ym of Object.keys(fixosPagos)) {
+    const mesObj = { ...fixosPagos[ym] };
+    for (const fixoId of Object.keys(mesObj)) {
+      if (mesObj[fixoId] === txId) delete mesObj[fixoId];
+    }
+    novo[ym] = mesObj;
+  }
+  return novo;
+}
+
 function migrar(d) {
   const base = estadoInicial();
   let categorias = Array.isArray(d.categorias) && d.categorias.length ? d.categorias : base.categorias;
   categorias = categorias.map((c, i) => ({ ...c, ordem: c.ordem ?? i }));
+
+  // migracao v1->v2: se havia categorias com fixo:true, cria itens fixos correspondentes
+  let fixos = Array.isArray(d.fixos) ? d.fixos : [];
+  if (!Array.isArray(d.fixos)) {
+    const antigasFixas = categorias.filter((c) => c.tipo === 'despesa' && c.fixo);
+    fixos = antigasFixas.map((c, i) => ({
+      id: uid(), nome: c.nome, valorEsperado: 0, categoria: c.id, ordem: i,
+    }));
+  }
+  // remove a flag fixo das categorias (agora e entidade propria)
+  categorias = categorias.map(({ fixo, ...c }) => c);
+
   return {
     ...base,
     ...d,
@@ -273,6 +361,7 @@ function migrar(d) {
     orcamentos: Array.isArray(d.orcamentos) ? d.orcamentos : [],
     metas: Array.isArray(d.metas) ? d.metas : [],
     investimentos: Array.isArray(d.investimentos) ? d.investimentos : [],
+    fixos,
     fixosPagos: d.fixosPagos && typeof d.fixosPagos === 'object' ? d.fixosPagos : {},
   };
 }
@@ -283,7 +372,6 @@ export function txDoMes(transacoes, ym) {
   return transacoes.filter((t) => mesDe(t.data) === ym);
 }
 
-// aportes recentes reduzem o saldo do mes (dinheiro que saiu da conta)
 export function resumoMes(transacoes, ym, investimentos = []) {
   const tx = txDoMes(transacoes, ym);
   let entradas = 0, saidas = 0;
@@ -323,15 +411,21 @@ export function totalInvestidoMes(investimentos = [], ym) {
   return aportesDoMes(investimentos, ym);
 }
 
-// ---- gastos fixos / checklist ----
-export function fixosDoMes(categorias, transacoes, fixosPagos, ym) {
-  const fixas = categorias
-    .filter((c) => c.tipo === 'despesa' && c.fixo)
-    .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0));
+// ---- gastos fixos ----
+// lista de fixos com status de pagamento no mes
+export function fixosDoMes(fixos, fixosPagos, transacoes, ym) {
   const pagosMes = fixosPagos[ym] || {};
-  return fixas.map((cat) => {
-    const marca = pagosMes[cat.id];
-    const gasto = gastoCategoriaMes(transacoes, cat.id, ym);
-    return { cat, pago: !!marca, valorPago: gasto, txId: typeof marca === 'string' ? marca : null };
-  });
+  return [...fixos]
+    .sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    .map((fixo) => {
+      const marca = pagosMes[fixo.id];
+      const txId = typeof marca === 'string' ? marca : null;
+      const tx = txId ? transacoes.find((t) => t.id === txId) : null;
+      return {
+        fixo,
+        pago: !!marca,
+        txId,
+        valorPago: tx ? tx.valor : 0,
+      };
+    });
 }

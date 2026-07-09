@@ -70,14 +70,16 @@ export default function HistoricoScreen({ navigation }) {
 
       {/* chips de categoria */}
       {catsDoMes.length > 0 && (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 18, gap: 8, paddingBottom: 12 }}>
-          <ChipFiltro label="Todas" ativo={!filtroCat} onPress={() => setFiltroCat(null)} />
-          {catsDoMes.map((c) => (
-            <ChipFiltro key={c.id} label={c.nome} cor={c.cor} icone={c.icone}
-              ativo={filtroCat === c.id} onPress={() => setFiltroCat(filtroCat === c.id ? null : c.id)} />
-          ))}
-        </ScrollView>
+        <View style={{ height: 52 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ paddingHorizontal: 18, paddingVertical: 4, alignItems: 'center' }}>
+            <ChipFiltro label="Todas" ativo={!filtroCat} onPress={() => setFiltroCat(null)} />
+            {catsDoMes.map((c) => (
+              <ChipFiltro key={c.id} label={c.nome} cor={c.cor} icone={c.icone}
+                ativo={filtroCat === c.id} onPress={() => setFiltroCat(filtroCat === c.id ? null : c.id)} />
+            ))}
+          </ScrollView>
+        </View>
       )}
 
       {secoes.length === 0 ? (
@@ -131,8 +133,8 @@ function ChipFiltro({ label, cor, icone, ativo, onPress }) {
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.8}
       style={{
-        flexDirection: 'row', alignItems: 'center', gap: 6, height: 36, paddingHorizontal: 14,
-        borderRadius: 18, backgroundColor: ativo ? (cor || C.primary) : C.card,
+        flexDirection: 'row', alignItems: 'center', gap: 6, height: 38, paddingHorizontal: 14,
+        borderRadius: 19, marginRight: 8, backgroundColor: ativo ? (cor || C.primary) : C.card,
         borderWidth: 1, borderColor: ativo ? (cor || C.primary) : C.borderSoft,
       }}>
       {icone && <MaterialCommunityIcons name={icone} size={15} color={ativo ? C.bg : (cor || C.muted)} />}

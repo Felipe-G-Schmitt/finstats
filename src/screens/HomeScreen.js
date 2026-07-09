@@ -13,15 +13,12 @@ export default function HomeScreen({ navigation }) {
   const [mes, setMes] = useState(mesAtual());
 
   const catPorId = useMemo(() => {
-    const m = {};
-    for (const c of dados.categorias) m[c.id] = c;
-    return m;
+    const m = {}; for (const c of dados.categorias) m[c.id] = c; return m;
   }, [dados.categorias]);
 
   const resumo = useMemo(() => resumoMes(dados.transacoes, mes, dados.investimentos), [dados.transacoes, mes, dados.investimentos]);
   const patrimonio = useMemo(() => patrimonioInvestido(dados.investimentos), [dados.investimentos]);
 
-  // orcamentos com progresso
   const orcamentos = useMemo(() => {
     return dados.orcamentos
       .map((o) => {
@@ -31,10 +28,14 @@ export default function HomeScreen({ navigation }) {
       .filter((o) => o.cat)
       .sort((a, b) => b.pct - a.pct);
   }, [dados.orcamentos, dados.transacoes, mes, catPorId]);
-
   const estourados = orcamentos.filter((o) => o.pct >= 1).length;
 
-  // metas do mes
+  const fixos = useMemo(
+    () => fixosDoMes(dados.fixos, dados.fixosPagos, dados.transacoes, mes),
+    [dados.fixos, dados.fixosPagos, dados.transacoes, mes]
+  );
+  const fixosPagos = fixos.filter((f) => f.pago).length;
+
   const metas = useMemo(() => {
     return dados.metas.map((m) => {
       let atual = 0, alvoValor = 0;
@@ -43,19 +44,13 @@ export default function HomeScreen({ navigation }) {
         alvoValor = m.modo === 'percent'
           ? (resumoMes(dados.transacoes, mes, dados.investimentos).entradas * m.alvo) / 100
           : m.alvo;
-      } else { // limite_categoria
+      } else {
         atual = gastoCategoriaMes(dados.transacoes, m.categoria, mes);
         alvoValor = m.alvo;
       }
       return { ...m, atual, alvoValor, cat: catPorId[m.categoria] };
     });
-  }, [dados.metas, dados.transacoes, mes, catPorId]);
-
-  const fixos = useMemo(
-    () => fixosDoMes(dados.categorias, dados.transacoes, dados.fixosPagos, mes),
-    [dados.categorias, dados.transacoes, dados.fixosPagos, mes]
-  );
-  const fixosPagos = fixos.filter((f) => f.pago).length;
+  }, [dados.metas, dados.transacoes, dados.investimentos, mes, catPorId]);
 
   const ultimas = useMemo(
     () => dados.transacoes.filter((t) => t.data.slice(0, 7) === mes).slice(0, 5),
@@ -64,7 +59,6 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <ScrollView style={{ backgroundColor: C.bg }} contentContainerStyle={{ padding: 18, paddingTop: insets.top + 14, paddingBottom: 110 }}>
-      {/* header */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
         <View>
           <Text style={{ color: C.muted, fontSize: 14 }}>Seu dinheiro</Text>
@@ -90,10 +84,7 @@ export default function HomeScreen({ navigation }) {
       <View style={{ backgroundColor: C.card, borderRadius: 24, padding: 20, marginBottom: 16 }}>
         <SeletorMes mes={mes} onChange={setMes} style={{ marginBottom: 16 }} />
         <Text style={{ color: C.muted, fontSize: 13 }}>Saldo do mês</Text>
-        <Text style={{
-          color: resumo.saldo >= 0 ? C.receita : C.despesa,
-          fontFamily: F.bold, fontSize: 40, marginTop: 2, marginBottom: 16,
-        }}>
+        <Text style={{ color: resumo.saldo >= 0 ? C.receita : C.despesa, fontFamily: F.bold, fontSize: 40, marginTop: 2, marginBottom: 16 }}>
           {brl(resumo.saldo)}
         </Text>
         <View style={{ flexDirection: 'row', gap: 12 }}>
@@ -107,7 +98,7 @@ export default function HomeScreen({ navigation }) {
         )}
       </View>
 
-      {/* card de patrimonio investido (separado do fluxo do mes) */}
+      {/* patrimonio investido */}
       <TouchableOpacity activeOpacity={0.85} onPress={() => navigation.navigate('Tabs', { screen: 'Investir' })}
         style={{ backgroundColor: C.card, borderRadius: 20, padding: 18, marginBottom: 16, flexDirection: 'row', alignItems: 'center' }}>
         <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: C.primarySoft, justifyContent: 'center', alignItems: 'center' }}>
@@ -120,7 +111,7 @@ export default function HomeScreen({ navigation }) {
         <MaterialCommunityIcons name="chevron-right" size={24} color={C.muted} />
       </TouchableOpacity>
 
-      {/* gastos fixos (checklist) */}
+      {/* gastos fixos */}
       {fixos.length > 0 && (
         <TouchableOpacity activeOpacity={0.85} onPress={() => navigation.navigate('Fixos')}
           style={{ backgroundColor: C.card, borderRadius: 20, padding: 18, marginBottom: 16, flexDirection: 'row', alignItems: 'center' }}>
@@ -129,9 +120,7 @@ export default function HomeScreen({ navigation }) {
           </View>
           <View style={{ flex: 1, marginLeft: 14 }}>
             <Text style={{ color: C.muted, fontSize: 13 }}>Gastos fixos do mês</Text>
-            <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18 }}>
-              {fixosPagos} de {fixos.length} pagos
-            </Text>
+            <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18 }}>{fixosPagos} de {fixos.length} pagos</Text>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={24} color={C.muted} />
         </TouchableOpacity>
@@ -140,13 +129,11 @@ export default function HomeScreen({ navigation }) {
       {/* orcamentos */}
       {orcamentos.length > 0 && (
         <View style={{ marginBottom: 8 }}>
-          <TituloSecao
-            acao={
-              <TouchableOpacity onPress={() => navigation.navigate('Tabs', { screen: 'Orcamentos' })}>
-                <Text style={{ color: C.primary, fontFamily: F.bold, fontSize: 13 }}>Ver todos</Text>
-              </TouchableOpacity>
-            }
-          >
+          <TituloSecao acao={
+            <TouchableOpacity onPress={() => navigation.navigate('Tabs', { screen: 'Orcamentos' })}>
+              <Text style={{ color: C.primary, fontFamily: F.bold, fontSize: 13 }}>Ver todos</Text>
+            </TouchableOpacity>
+          }>
             Orçamentos {estourados > 0 ? `(${estourados} estourado${estourados > 1 ? 's' : ''})` : ''}
           </TituloSecao>
           {orcamentos.slice(0, 3).map((o) => (
@@ -159,9 +146,7 @@ export default function HomeScreen({ navigation }) {
               </View>
               <Progresso pct={o.pct} />
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6 }}>
-                <Text style={{ color: o.pct >= 1 ? C.despesa : C.muted, fontSize: 12 }}>
-                  {brl(o.gasto)} de {brl(o.limite)}
-                </Text>
+                <Text style={{ color: o.pct >= 1 ? C.despesa : C.muted, fontSize: 12 }}>{brl(o.gasto)} de {brl(o.limite)}</Text>
                 <Text style={{ color: C.muted, fontSize: 12 }}>{Math.round(o.pct * 100)}%</Text>
               </View>
             </View>
@@ -172,27 +157,19 @@ export default function HomeScreen({ navigation }) {
       {/* metas */}
       {metas.length > 0 && (
         <View style={{ marginBottom: 8 }}>
-          <TituloSecao
-            acao={
-              <TouchableOpacity onPress={() => navigation.navigate('Metas')}>
-                <Text style={{ color: C.primary, fontFamily: F.bold, fontSize: 13 }}>Ver todas</Text>
-              </TouchableOpacity>
-            }
-          >
-            Metas
-          </TituloSecao>
+          <TituloSecao acao={
+            <TouchableOpacity onPress={() => navigation.navigate('Metas')}>
+              <Text style={{ color: C.primary, fontFamily: F.bold, fontSize: 13 }}>Ver todas</Text>
+            </TouchableOpacity>
+          }>Metas</TituloSecao>
           {metas.slice(0, 2).map((m) => {
             const pct = m.alvoValor > 0 ? m.atual / m.alvoValor : 0;
             const ehLimite = m.tipo === 'limite_categoria';
-            // limite: bom = abaixo; investir: bom = acima
             const corBarra = ehLimite ? (pct >= 1 ? C.despesa : pct >= 0.8 ? C.alerta : C.primary) : C.primary;
             return (
               <View key={m.id} style={{ backgroundColor: C.card, borderRadius: 16, padding: 14, marginBottom: 10 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                  <MaterialCommunityIcons
-                    name={ehLimite ? 'target' : 'piggy-bank-outline'} size={20}
-                    color={C.primary} style={{ marginRight: 8 }}
-                  />
+                  <MaterialCommunityIcons name={ehLimite ? 'target' : 'piggy-bank-outline'} size={20} color={C.primary} style={{ marginRight: 8 }} />
                   <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 14, flex: 1 }}>
                     {ehLimite ? `Gastar até em ${m.cat?.nome || '—'}` : 'Investir este mês'}
                   </Text>
@@ -207,16 +184,12 @@ export default function HomeScreen({ navigation }) {
         </View>
       )}
 
-      {/* ultimas transacoes */}
-      <TituloSecao
-        acao={
-          <TouchableOpacity onPress={() => navigation.navigate('Tabs', { screen: 'Historico' })}>
-            <Text style={{ color: C.primary, fontFamily: F.bold, fontSize: 13 }}>Histórico</Text>
-          </TouchableOpacity>
-        }
-      >
-        Últimas
-      </TituloSecao>
+      {/* ultimas */}
+      <TituloSecao acao={
+        <TouchableOpacity onPress={() => navigation.navigate('Tabs', { screen: 'Historico' })}>
+          <Text style={{ color: C.primary, fontFamily: F.bold, fontSize: 13 }}>Histórico</Text>
+        </TouchableOpacity>
+      }>Últimas</TituloSecao>
       {ultimas.length === 0 ? (
         <Vazio icone="cash-remove" texto={`Nenhuma transação em ${rotuloMes(mes)}.\nToque no + para adicionar.`} />
       ) : (
@@ -224,20 +197,12 @@ export default function HomeScreen({ navigation }) {
           {ultimas.map((t, i) => {
             const cat = catPorId[t.categoria];
             return (
-              <TouchableOpacity
-                key={t.id} activeOpacity={0.7}
-                onPress={() => navigation.navigate('Add', { transacao: t })}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', padding: 14,
-                  borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.borderSoft,
-                }}
-              >
+              <TouchableOpacity key={t.id} activeOpacity={0.7} onPress={() => navigation.navigate('Add', { transacao: t })}
+                style={{ flexDirection: 'row', alignItems: 'center', padding: 14, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.borderSoft }}>
                 <IconeCat cat={cat} size={40} />
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 14 }}>{cat?.nome || 'Categoria'}</Text>
-                  <Text style={{ color: C.muted, fontSize: 12 }} numberOfLines={1}>
-                    {t.descricao || diaMesExtenso(t.data)}
-                  </Text>
+                  <Text style={{ color: C.muted, fontSize: 12 }} numberOfLines={1}>{t.descricao || diaMesExtenso(t.data)}</Text>
                 </View>
                 <Text style={{ color: t.tipo === 'receita' ? C.receita : C.despesa, fontFamily: F.bold, fontSize: 15 }}>
                   {t.tipo === 'receita' ? '+' : '-'}{brl(t.valor).replace('R$ ', '')}

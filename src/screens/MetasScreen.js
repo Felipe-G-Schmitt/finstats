@@ -40,7 +40,7 @@ export default function MetasScreen({ navigation }) {
       const pct = alvoValor > 0 ? atual / alvoValor : 0;
       return { ...m, atual, alvoValor, pct, cat: catPorId[m.categoria] };
     });
-  }, [dados.metas, dados.transacoes, mes, catPorId]);
+  }, [dados.metas, dados.transacoes, dados.investimentos, mes, catPorId]);
 
   function abrirNovo() {
     setEditId(null); setTipo('investir'); setModo('valor'); setAlvoStr(''); setCatSel(null); setModal(true);
