@@ -7,11 +7,12 @@ import { C, F, PALETA } from '../lib/theme';
 import { useStore } from '../lib/store';
 import { ICONES_DISPONIVEIS } from '../lib/categories';
 import { exportarArquivo, importarArquivo } from '../lib/backup';
+import { parseValor } from '../lib/utils';
 import { IconeCat, Botao } from '../lib/ui';
 
 export default function AjustesScreen({ navigation }) {
   const insets = useSafeAreaInsets();
-  const { dados, addCategoria, editCategoria, delCategoria, reordenarCategorias, exportarJSON, importarJSON, resetar } = useStore();
+  const { dados, addCategoria, editCategoria, delCategoria, reordenarCategorias, setConfig, exportarJSON, importarJSON, resetar } = useStore();
   const [busy, setBusy] = useState(false);
 
   const [modal, setModal] = useState(false);
@@ -155,14 +156,56 @@ export default function AjustesScreen({ navigation }) {
         {busy && <ActivityIndicator color={C.primary} style={{ marginTop: 12 }} />}
       </View>
 
+      <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18, marginBottom: 12, marginTop: 20 }}>Planejamento</Text>
       <TouchableOpacity onPress={() => navigation.navigate('Fixos')}
-        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginTop: 8 }}>
+        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 8 }}>
         <MaterialCommunityIcons name="playlist-check" size={22} color={C.primary} />
         <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 15, flex: 1, marginLeft: 12 }}>Gerenciar gastos fixos</Text>
         <MaterialCommunityIcons name="chevron-right" size={24} color={C.muted} />
       </TouchableOpacity>
 
-      <Text style={{ color: C.mutedDim, fontSize: 12, marginTop: 14 }}>
+      <TouchableOpacity onPress={() => navigation.navigate('ReceitasFixas')}
+        style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 8 }}>
+        <MaterialCommunityIcons name="cash-multiple" size={22} color={C.receita} />
+        <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 15, flex: 1, marginLeft: 12 }}>Receita fixa</Text>
+        <MaterialCommunityIcons name="chevron-right" size={24} color={C.muted} />
+      </TouchableOpacity>
+
+      {/* valor base de projecao (fallback sem historico) */}
+      <View style={{ backgroundColor: C.card, borderRadius: 16, padding: 16, marginBottom: 8 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+          <MaterialCommunityIcons name="chart-timeline-variant" size={20} color={C.primary} />
+          <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 15, marginLeft: 10 }}>Valor base de projeção</Text>
+        </View>
+        <Text style={{ color: C.mutedDim, fontSize: 12, marginBottom: 12, lineHeight: 17 }}>
+          Usado enquanto você não tem 3 meses de histórico. Serve de estimativa pros planos.
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: C.muted, fontSize: 12, marginBottom: 6 }}>Receita/mês</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.cardSoft, borderRadius: 12, paddingHorizontal: 12 }}>
+              <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 14 }}>R$</Text>
+              <TextInput defaultValue={dados.config?.receitaBase ? String(dados.config.receitaBase) : ''}
+                onEndEditing={(e) => setConfig({ receitaBase: parseValor(e.nativeEvent.text) })}
+                keyboardType="numeric" placeholder="0" placeholderTextColor={C.mutedDim}
+                style={{ flex: 1, color: C.text, fontFamily: F.bold, fontSize: 16, paddingVertical: 11, marginLeft: 6 }} />
+            </View>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: C.muted, fontSize: 12, marginBottom: 6 }}>Despesa/mês</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: C.cardSoft, borderRadius: 12, paddingHorizontal: 12 }}>
+              <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 14 }}>R$</Text>
+              <TextInput defaultValue={dados.config?.despesaBase ? String(dados.config.despesaBase) : ''}
+                onEndEditing={(e) => setConfig({ despesaBase: parseValor(e.nativeEvent.text) })}
+                keyboardType="numeric" placeholder="0" placeholderTextColor={C.mutedDim}
+                style={{ flex: 1, color: C.text, fontFamily: F.bold, fontSize: 16, paddingVertical: 11, marginLeft: 6 }} />
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <Text style={{ color: C.text, fontFamily: F.bold, fontSize: 18, marginBottom: 12, marginTop: 20 }}>Categorias</Text>
+      <Text style={{ color: C.mutedDim, fontSize: 12, marginBottom: 14, marginTop: -4 }}>
         Segure ⠿ e arraste pra reordenar (nos dois sentidos). Toque pra editar.
       </Text>
     </View>

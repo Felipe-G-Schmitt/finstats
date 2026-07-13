@@ -15,6 +15,7 @@ import OrcamentosScreen from './src/screens/OrcamentosScreen';
 import MetasScreen from './src/screens/MetasScreen';
 import InvestirScreen from './src/screens/InvestirScreen';
 import FixosScreen from './src/screens/FixosScreen';
+import ReceitasFixasScreen from './src/screens/ReceitasFixasScreen';
 import AddScreen from './src/screens/AddScreen';
 import DateScreen from './src/screens/DateScreen';
 import AjustesScreen from './src/screens/AjustesScreen';
@@ -29,7 +30,6 @@ const ABAS = {
   Investir: { icone: 'chart-areaspline', label: 'Investir' },
 };
 
-// Tab bar: Home, Historico, [ + ], Orcamentos, Investir
 function TabBar({ state, navigation }) {
   const insets = useSafeAreaInsets();
   const esquerda = ['Home', 'Historico'];
@@ -51,7 +51,6 @@ function TabBar({ state, navigation }) {
   };
 
   const padBottom = Math.max(insets.bottom, 12);
-
   return (
     <View style={{
       flexDirection: 'row', alignItems: 'center', backgroundColor: C.card,
@@ -60,8 +59,7 @@ function TabBar({ state, navigation }) {
     }}>
       {esquerda.map(item)}
       <View style={{ flex: 1, alignItems: 'center' }}>
-        <TouchableOpacity
-          onPress={() => navigation.navigate('Add')} activeOpacity={0.85}
+        <TouchableOpacity onPress={() => navigation.getParent().navigate('Add')} activeOpacity={0.85}
           style={{
             position: 'absolute', top: -34, width: 62, height: 62, borderRadius: 31,
             backgroundColor: C.primary, justifyContent: 'center', alignItems: 'center',
@@ -89,7 +87,6 @@ function Tabs() {
 
 export default function RootNavigation() {
   const { pronto } = useStore();
-
   if (!pronto) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: C.bg }}>
@@ -97,7 +94,6 @@ export default function RootNavigation() {
       </View>
     );
   }
-
   return (
     <NavigationContainer theme={{
       ...DarkTheme,
@@ -108,6 +104,7 @@ export default function RootNavigation() {
         <Stack.Screen name="Graficos" component={GraficosScreen} />
         <Stack.Screen name="Metas" component={MetasScreen} />
         <Stack.Screen name="Fixos" component={FixosScreen} />
+        <Stack.Screen name="ReceitasFixas" component={ReceitasFixasScreen} />
         <Stack.Screen name="Add" component={AddScreen} options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="SelecionarData" component={DateScreen} options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="Ajustes" component={AjustesScreen} />

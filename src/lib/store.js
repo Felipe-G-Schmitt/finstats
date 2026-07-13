@@ -2,10 +2,10 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { CATEGORIAS_PADRAO } from './categories';
-import { uid, mesDe } from './utils';
+import { uid, mesDe, mesAtual, deslocaMes } from './utils';
 
 const CHAVE = '@finstats/dados/v1';
-const SCHEMA = 2;
+const SCHEMA = 3;
 
 function estadoInicial() {
   return {
@@ -24,6 +24,12 @@ function estadoInicial() {
     fixos: [],
     // pagamentos por mes: { 'YYYY-MM': { fixoId: txId } } — vinculado a uma transacao
     fixosPagos: {},
+    // receitas fixas = fontes recorrentes de renda (ex: Salario, Bolsa)
+    // {id, nome, valorEsperado, dia, ordem}
+    receitasFixas: [],
+    // config de projecao: valores base usados quando falta historico (< 3 meses)
+    // {receitaBase, despesaBase} — 0 = nao definido
+    config: { receitaBase: 0, despesaBase: 0 },
   };
 }
 
@@ -211,6 +217,49 @@ export function StoreProvider({ children }) {
     });
   }, [atualizar]);
 
+  // ---------- RECEITAS FIXAS (fontes de renda recorrentes) ----------
+  const addReceitaFixa = useCallback((r) => {
+    atualizar((d) => {
+      const maxOrdem = d.receitasFixas.reduce((m, x) => Math.max(m, x.ordem ?? 0), 0);
+      return {
+        ...d,
+        receitasFixas: [...d.receitasFixas, {
+          id: uid(), ordem: maxOrdem + 1,
+          nome: (r.nome || '').trim(),
+          valorEsperado: Math.abs(Number(r.valorEsperado) || 0),
+          dia: r.dia != null ? Number(r.dia) : null,
+        }],
+      };
+    });
+  }, [atualizar]);
+
+  const editReceitaFixa = useCallback((id, patch) => {
+    atualizar((d) => ({
+      ...d,
+      receitasFixas: d.receitasFixas.map((r) => (r.id === id ? {
+        ...r, ...patch,
+        valorEsperado: patch.valorEsperado != null ? Math.abs(Number(patch.valorEsperado) || 0) : r.valorEsperado,
+      } : r)),
+    }));
+  }, [atualizar]);
+
+  const delReceitaFixa = useCallback((id) => {
+    atualizar((d) => ({ ...d, receitasFixas: d.receitasFixas.filter((r) => r.id !== id) }));
+  }, [atualizar]);
+
+  const reordenarReceitasFixas = useCallback((listaOrdenada) => {
+    atualizar((d) => {
+      const ordemPorId = {};
+      listaOrdenada.forEach((r, i) => { ordemPorId[r.id] = i; });
+      return { ...d, receitasFixas: d.receitasFixas.map((r) => (ordemPorId[r.id] != null ? { ...r, ordem: ordemPorId[r.id] } : r)) };
+    });
+  }, [atualizar]);
+
+  // ---------- CONFIG (valores base de projecao) ----------
+  const setConfig = useCallback((patch) => {
+    atualizar((d) => ({ ...d, config: { ...d.config, ...patch } }));
+  }, [atualizar]);
+
   // ---------- ORCAMENTOS ----------
   const setOrcamento = useCallback((categoria, limite) => {
     atualizar((d) => {
@@ -305,12 +354,15 @@ export function StoreProvider({ children }) {
     addTransacao, editTransacao, delTransacao,
     addCategoria, editCategoria, delCategoria, reordenarCategorias,
     addFixo, editFixo, delFixo, reordenarFixos, toggleFixoPago,
+    addReceitaFixa, editReceitaFixa, delReceitaFixa, reordenarReceitasFixas,
+    setConfig,
     setOrcamento,
     addMeta, editMeta, delMeta,
     addInvestimento, editInvestimento, delInvestimento,
     exportarJSON, importarJSON, resetar,
   }), [dados, pronto, addTransacao, editTransacao, delTransacao, addCategoria, editCategoria,
        delCategoria, reordenarCategorias, addFixo, editFixo, delFixo, reordenarFixos, toggleFixoPago,
+       addReceitaFixa, editReceitaFixa, delReceitaFixa, reordenarReceitasFixas, setConfig,
        setOrcamento, addMeta, editMeta, delMeta, addInvestimento, editInvestimento, delInvestimento,
        exportarJSON, importarJSON, resetar]);
 
@@ -363,6 +415,10 @@ function migrar(d) {
     investimentos: Array.isArray(d.investimentos) ? d.investimentos : [],
     fixos,
     fixosPagos: d.fixosPagos && typeof d.fixosPagos === 'object' ? d.fixosPagos : {},
+    receitasFixas: Array.isArray(d.receitasFixas) ? d.receitasFixas : [],
+    config: d.config && typeof d.config === 'object'
+      ? { receitaBase: 0, despesaBase: 0, ...d.config }
+      : { receitaBase: 0, despesaBase: 0 },
   };
 }
 
@@ -428,4 +484,108 @@ export function fixosDoMes(fixos, fixosPagos, transacoes, ym) {
         valorPago: tx ? tx.valor : 0,
       };
     });
+}
+
+// ---- receitas fixas ----
+export function totalReceitaFixa(receitasFixas = []) {
+  return receitasFixas.reduce((s, r) => s + (Number(r.valorEsperado) || 0), 0);
+}
+
+// ---- PROJECAO / PLANEJAMENTO ----
+
+// meses fechados anteriores ao atual (o mes corrente esta incompleto, entao nao entra na media)
+function mesesFechados(n) {
+  const out = [];
+  let ym = deslocaMes(mesAtual(), -1); // comeca no mes passado
+  for (let i = 0; i < n; i++) { out.unshift(ym); ym = deslocaMes(ym, -1); }
+  return out;
+}
+
+// media de receita e despesa dos ultimos `n` meses fechados que tenham dados.
+// retorna tambem quantos meses de fato tinham movimento (p/ saber se ha historico)
+export function mediaMensal(transacoes, n = 3) {
+  const meses = mesesFechados(n);
+  let somaRec = 0, somaDesp = 0, mesesComDados = 0;
+  for (const ym of meses) {
+    const tx = txDoMes(transacoes, ym);
+    if (tx.length === 0) continue;
+    mesesComDados++;
+    for (const t of tx) {
+      if (t.tipo === 'receita') somaRec += Number(t.valor) || 0;
+      else somaDesp += Number(t.valor) || 0;
+    }
+  }
+  const div = mesesComDados || 1;
+  return {
+    receita: somaRec / div,
+    despesa: somaDesp / div,
+    mesesComDados,
+    temHistorico: mesesComDados > 0,
+  };
+}
+
+// monta o comparativo lado a lado (fixa cadastrada vs media) + qual sobra usar.
+// config.receitaBase/despesaBase entram como fallback quando nao ha historico.
+export function projecao(dados) {
+  const { transacoes, receitasFixas, fixos, config } = dados;
+  const media = mediaMensal(transacoes, 3);
+
+  // coluna "fixa cadastrada": receita fixa cadastrada e despesa = soma dos gastos fixos previstos
+  const receitaFixaCad = totalReceitaFixa(receitasFixas);
+  const despesaFixaCad = (fixos || []).reduce((s, f) => s + (Number(f.valorEsperado) || 0), 0);
+
+  // coluna "media 3 meses": usa historico; se nao houver, cai pro valor base do config
+  const temHist = media.temHistorico;
+  const receitaMedia = temHist ? media.receita : (Number(config?.receitaBase) || 0);
+  const despesaMedia = temHist ? media.despesa : (Number(config?.despesaBase) || 0);
+
+  const colFixa = { receita: receitaFixaCad, despesa: despesaFixaCad, sobra: receitaFixaCad - despesaFixaCad };
+  const colMedia = { receita: receitaMedia, despesa: despesaMedia, sobra: receitaMedia - despesaMedia };
+
+  // sobra sugerida: usa a MENOR das duas sobras positivas (conservador); se so uma existe, usa ela
+  const sobras = [colFixa.sobra, colMedia.sobra].filter((s) => s > 0);
+  const sobraSugerida = sobras.length ? Math.min(...sobras) : Math.max(colFixa.sobra, colMedia.sobra, 0);
+
+  return {
+    fixa: colFixa,
+    media: colMedia,
+    temHistorico: temHist,
+    mesesComDados: media.mesesComDados,
+    // precisa de valor base? (sem historico E sem receita fixa cadastrada)
+    precisaBase: !temHist && receitaFixaCad === 0,
+    sobraSugerida,
+  };
+}
+
+// numero de meses cheios entre hoje e uma data-alvo 'YYYY-MM-DD' (minimo 1)
+export function mesesAte(dataAlvoISO) {
+  if (!dataAlvoISO) return 1;
+  const hoje = new Date();
+  const [a, m] = dataAlvoISO.split('-').map(Number);
+  const alvo = new Date(a, m - 1, 1);
+  const meses = (alvo.getFullYear() - hoje.getFullYear()) * 12 + (alvo.getMonth() - hoje.getMonth());
+  return Math.max(1, meses);
+}
+
+// dado alvo + ja guardado + data -> quanto por mes
+export function planoPorData(alvo, jaGuardado, dataAlvoISO) {
+  const falta = Math.max(0, (Number(alvo) || 0) - (Number(jaGuardado) || 0));
+  const meses = mesesAte(dataAlvoISO);
+  return { falta, meses, mensal: falta / meses };
+}
+
+// dado alvo + ja guardado + mensal -> em quantos meses termina, e a data
+export function planoPorMensal(alvo, jaGuardado, mensal) {
+  const falta = Math.max(0, (Number(alvo) || 0) - (Number(jaGuardado) || 0));
+  const m = Number(mensal) || 0;
+  if (falta <= 0) return { falta: 0, meses: 0, dataISO: hojeMaisMeses(0) };
+  if (m <= 0) return { falta, meses: Infinity, dataISO: null };
+  const meses = Math.ceil(falta / m);
+  return { falta, meses, dataISO: hojeMaisMeses(meses) };
+}
+
+function hojeMaisMeses(meses) {
+  const d = new Date();
+  d.setMonth(d.getMonth() + meses);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
